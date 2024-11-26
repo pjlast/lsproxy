@@ -66,19 +66,31 @@ func (pc *proxyConn) handleConnection() {
 	fmt.Printf("Serving %s\n", pc.conn.RemoteAddr().String())
 	bufferedReader := bufio.NewReader(pc.conn)
 	for {
-		header, err := bufferedReader.ReadBytes('\n')
-		if err != nil {
-			if err != io.EOF {
-				fmt.Println("read error:", err)
+		// Read until \r\n\r\n
+		headers := make(map[string]string)
+		rawHeaders := []byte{}
+		for true {
+			header, err := bufferedReader.ReadBytes('\n')
+			if err != nil {
+				if err != io.EOF {
+					fmt.Println("read error:", err)
+				}
+				println("END OF FILE")
+				return
 			}
-			println("END OF FILE")
-			break
+			rawHeaders = append(rawHeaders, header...)
+			if bytes.Equal(header, []byte("\r\n")) {
+				break
+			}
+			header = bytes.TrimRight(header, "\r\n")
+			headerParts := bytes.SplitN(header, []byte(":"), 2)
+			headers[strings.ToLower(string(headerParts[0]))] = string(bytes.TrimLeft(headerParts[1], " "))
 		}
-		numToRead, _ := strconv.Atoi(strings.TrimRight(string(bytes.Split(header, []byte(" "))[1]), "\r\n"))
-		msg := make([]byte, numToRead+2)
+		numToRead, _ := strconv.Atoi(headers["content-length"])
+		msg := make([]byte, numToRead)
 		io.ReadFull(bufferedReader, msg)
 
-		msg = slices.Concat(header, msg)
+		msg = slices.Concat(rawHeaders, msg)
 		fmt.Println("CLIENT -> SERVER", string(msg))
 		pc.writer.Write(msg)
 	}
